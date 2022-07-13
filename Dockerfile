@@ -32,11 +32,11 @@ RUN cd $SRC_DIR \
 ENV SUEXEC_VERSION v0.2
 ENV TINI_VERSION v0.19.0
 RUN set -eux; \
-    dpkgArch="$(dpkg --print-architecture)"; \
-    case "${dpkgArch##*-}" in \
-        "amd64" | "armhf" | "arm64") tiniArch="tini-static-$dpkgArch" ;;\
-        *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
-    esac; \
+  dpkgArch="$(dpkg --print-architecture)"; \
+  case "${dpkgArch##*-}" in \
+  "amd64" | "armhf" | "arm64") tiniArch="tini-static-$dpkgArch" ;;\
+  *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
+  esac; \
   cd /tmp \
   && git clone https://github.com/ncopa/su-exec.git \
   && cd su-exec \
@@ -59,12 +59,14 @@ COPY --from=0 /tmp/su-exec/su-exec-static /sbin/su-exec
 COPY --from=0 /tmp/tini /sbin/tini
 COPY --from=0 /bin/fusermount /usr/local/bin/fusermount
 COPY --from=0 /etc/ssl/certs /etc/ssl/certs
+COPY --from=0 $SRC_DIR/custom_start /usr/local/bin/custom_start
 
 # Add suid bit on fusermount so it will run properly
 RUN chmod 4755 /usr/local/bin/fusermount
 
 # Fix permissions on start_ipfs (ignore the build machine's permissions)
 RUN chmod 0755 /usr/local/bin/start_ipfs
+RUN chmod 0755 /usr/local/bin/custom_start
 
 # This shared lib (part of glibc) doesn't seem to be included with busybox.
 COPY --from=0 /lib/*-linux-gnu*/libdl.so.2 /lib/
@@ -109,7 +111,7 @@ ENV IPFS_LOGGING ""
 # This just makes sure that:
 # 1. There's an fs-repo, and initializes one if there isn't.
 # 2. The API and Gateway are accessible from outside the container.
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/start_ipfs"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/custom_start"]
 
 # Heathcheck for the container
 # QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn is the CID of empty folder

@@ -8,7 +8,7 @@ import (
 	"math"
 	"testing"
 
-	files "github.com/ipfs/go-ipfs-files"
+	"github.com/ipfs/go-libipfs/files"
 	"github.com/ipfs/kubo/core"
 	"github.com/ipfs/kubo/core/bootstrap"
 	"github.com/ipfs/kubo/core/coreapi"
@@ -65,12 +65,12 @@ func benchCat(b *testing.B, data []byte, conf testutil.LatencyConfig) error {
 	}
 	defer catter.Close()
 
-	adderApi, err := coreapi.NewCoreAPI(adder)
+	adderAPI, err := coreapi.NewCoreAPI(adder)
 	if err != nil {
 		return err
 	}
 
-	catterApi, err := coreapi.NewCoreAPI(catter)
+	catterAPI, err := coreapi.NewCoreAPI(catter)
 	if err != nil {
 		return err
 	}
@@ -90,13 +90,13 @@ func benchCat(b *testing.B, data []byte, conf testutil.LatencyConfig) error {
 		return err
 	}
 
-	added, err := adderApi.Unixfs().Add(ctx, files.NewBytesFile(data))
+	added, err := adderAPI.Unixfs().Add(ctx, files.NewBytesFile(data))
 	if err != nil {
 		return err
 	}
 
 	b.StartTimer()
-	readerCatted, err := catterApi.Unixfs().Get(ctx, added)
+	readerCatted, err := catterAPI.Unixfs().Get(ctx, added)
 	if err != nil {
 		return err
 	}

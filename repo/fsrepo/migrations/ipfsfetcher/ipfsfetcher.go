@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	files "github.com/ipfs/go-ipfs-files"
+	"github.com/ipfs/go-libipfs/files"
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/options"
 	ipath "github.com/ipfs/interface-go-ipfs-core/path"
@@ -28,7 +28,7 @@ const (
 	// Default maximum download size
 	defaultFetchLimit = 1024 * 1024 * 512
 
-	tempNodeTcpAddr = "/ip4/127.0.0.1/tcp/0"
+	tempNodeTCPAddr = "/ip4/127.0.0.1/tcp/0"
 )
 
 type IpfsFetcher struct {
@@ -188,12 +188,12 @@ func initTempNode(ctx context.Context, bootstrap []string, peers []peer.AddrInfo
 	}
 
 	// configure the temporary node
-	cfg.Routing.Type = "dhtclient"
+	cfg.Routing.Type = config.NewOptionalString("dhtclient")
 
 	// Disable listening for inbound connections
 	cfg.Addresses.Gateway = []string{}
 	cfg.Addresses.API = []string{}
-	cfg.Addresses.Swarm = []string{tempNodeTcpAddr}
+	cfg.Addresses.Swarm = []string{tempNodeTCPAddr}
 
 	if len(bootstrap) != 0 {
 		cfg.Bootstrap = bootstrap

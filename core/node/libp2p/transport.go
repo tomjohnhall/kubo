@@ -33,20 +33,16 @@ func Transports(tptConfig config.Transports) interface{} {
 		if tptConfig.Network.QUIC.WithDefault(!privateNetworkEnabled) {
 			if privateNetworkEnabled {
 				return opts, fmt.Errorf(
-					"The QUIC transport does not support private networks. " +
-						"Please disable Swarm.Transports.Network.QUIC.",
+					"QUIC transport does not support private networks, please disable Swarm.Transports.Network.QUIC",
 				)
 			}
-			// TODO(9290): Make WithMetrics configurable
-			opts.Opts = append(opts.Opts, libp2p.Transport(quic.NewTransport, quic.WithMetrics()))
+			opts.Opts = append(opts.Opts, libp2p.Transport(quic.NewTransport))
 		}
 
-		// TODO(9292): Remove the false && to allows it enabled by default
-		if tptConfig.Network.WebTransport.WithDefault(false && !privateNetworkEnabled) {
+		if tptConfig.Network.WebTransport.WithDefault(!privateNetworkEnabled) {
 			if privateNetworkEnabled {
 				return opts, fmt.Errorf(
-					"The WebTransport transport does not support private networks. " +
-						"Please disable Swarm.Transports.Network.WebTransport.",
+					"WebTransport transport does not support private networks, please disable Swarm.Transports.Network.WebTransport",
 				)
 			}
 			opts.Opts = append(opts.Opts, libp2p.Transport(webtransport.New))

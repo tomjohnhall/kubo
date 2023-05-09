@@ -14,7 +14,7 @@ import (
 	mock "github.com/ipfs/kubo/core/mock"
 	"github.com/ipfs/kubo/thirdparty/unit"
 
-	files "github.com/ipfs/go-ipfs-files"
+	"github.com/ipfs/go-libipfs/files"
 	testutil "github.com/libp2p/go-libp2p-testing/net"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -93,12 +93,12 @@ func RunThreeLeggedCat(data []byte, conf testutil.LatencyConfig) error {
 	}
 	defer catter.Close()
 
-	adderApi, err := coreapi.NewCoreAPI(adder)
+	adderAPI, err := coreapi.NewCoreAPI(adder)
 	if err != nil {
 		return err
 	}
 
-	catterApi, err := coreapi.NewCoreAPI(catter)
+	catterAPI, err := coreapi.NewCoreAPI(catter)
 	if err != nil {
 		return err
 	}
@@ -117,12 +117,12 @@ func RunThreeLeggedCat(data []byte, conf testutil.LatencyConfig) error {
 		return err
 	}
 
-	added, err := adderApi.Unixfs().Add(ctx, files.NewBytesFile(data))
+	added, err := adderAPI.Unixfs().Add(ctx, files.NewBytesFile(data))
 	if err != nil {
 		return err
 	}
 
-	readerCatted, err := catterApi.Unixfs().Get(ctx, added)
+	readerCatted, err := catterAPI.Unixfs().Get(ctx, added)
 	if err != nil {
 		return err
 	}

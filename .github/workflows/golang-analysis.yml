@@ -1,9 +1,17 @@
-on: [push, pull_request]
 name: Go Checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - 'master'
 
 jobs:
   unit:
+    if: github.repository == 'ipfs/kubo' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: All
     steps:
       - uses: actions/checkout@v2

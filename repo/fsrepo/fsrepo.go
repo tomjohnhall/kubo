@@ -16,6 +16,7 @@ import (
 	repo "github.com/ipfs/kubo/repo"
 	"github.com/ipfs/kubo/repo/common"
 	dir "github.com/ipfs/kubo/thirdparty/dir"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 
 	ds "github.com/ipfs/go-datastore"
 	measure "github.com/ipfs/go-ds-measure"
@@ -35,8 +36,8 @@ const LockFile = "repo.lock"
 
 var log = logging.Logger("fsrepo")
 
-// version number that we are currently expecting to see
-var RepoVersion = 12
+// RepoVersion is the version number that we are currently expecting to see
+var RepoVersion = 13
 
 var migrationInstructions = `See https://github.com/ipfs/fs-repo-migrations/blob/master/run.md
 Sorry for the inconvenience. In the future, these will run automatically.`
@@ -102,11 +103,12 @@ type FSRepo struct {
 	configFilePath string
 	// lockfile is the file system lock to prevent others from opening
 	// the same fsrepo path concurrently
-	lockfile io.Closer
-	config   *config.Config
-	ds       repo.Datastore
-	keystore keystore.Keystore
-	filemgr  *filestore.FileManager
+	lockfile              io.Closer
+	config                *config.Config
+	userResourceOverrides rcmgr.PartialLimitConfig
+	ds                    repo.Datastore
+	keystore              keystore.Keystore
+	filemgr               *filestore.FileManager
 }
 
 var _ repo.Repo = (*FSRepo)(nil)
@@ -177,6 +179,10 @@ func open(repoPath string, userConfigFilePath string) (repo.Repo, error) {
 	}
 
 	if err := r.openConfig(); err != nil {
+		return nil, err
+	}
+
+	if err := r.openUserResourceOverrides(); err != nil {
 		return nil, err
 	}
 
@@ -383,7 +389,7 @@ func (r *FSRepo) SetAPIAddr(addr ma.Multiaddr) error {
 	}
 	// Remove the temp file when rename return error
 	if err1 := os.Remove(filepath.Join(r.path, "."+apiFile+".tmp")); err1 != nil {
-		return fmt.Errorf("File Rename error: %s, File remove error: %s", err.Error(),
+		return fmt.Errorf("file Rename error: %s, file remove error: %s", err.Error(),
 			err1.Error())
 	}
 	return err
@@ -422,7 +428,7 @@ func (r *FSRepo) SetGatewayAddr(addr net.Addr) error {
 	}
 	// Remove the temp file when rename return error
 	if err1 := os.Remove(tmpPath); err1 != nil {
-		return fmt.Errorf("File Rename error: %w, File remove error: %s", err, err1.Error())
+		return fmt.Errorf("file Rename error: %w, file remove error: %s", err, err1.Error())
 	}
 	return err
 }
@@ -435,6 +441,17 @@ func (r *FSRepo) openConfig() error {
 	}
 	r.config = conf
 	return nil
+}
+
+// openUserResourceOverrides will remove all overrides if the file is not present.
+// It will error if the decoding fails.
+func (r *FSRepo) openUserResourceOverrides() error {
+	// This filepath is documented in docs/libp2p-resource-management.md and be kept in sync.
+	err := serialize.ReadConfigFile(filepath.Join(r.path, "libp2p-resource-limit-overrides.json"), &r.userResourceOverrides)
+	if err == serialize.ErrNotInitialized {
+		err = nil
+	}
+	return err
 }
 
 func (r *FSRepo) openKeystore() error {
@@ -552,6 +569,21 @@ func (r *FSRepo) Config() (*config.Config, error) {
 		return nil, errors.New("cannot access config, repo not open")
 	}
 	return r.config, nil
+}
+
+func (r *FSRepo) UserResourceOverrides() (rcmgr.PartialLimitConfig, error) {
+	// It is not necessary to hold the package lock since the repo is in an
+	// opened state. The package lock is _not_ meant to ensure that the repo is
+	// thread-safe. The package lock is only meant to guard against removal and
+	// coordinate the lockfile. However, we provide thread-safety to keep
+	// things simple.
+	packageLock.Lock()
+	defer packageLock.Unlock()
+
+	if r.closed {
+		return rcmgr.PartialLimitConfig{}, errors.New("cannot access config, repo not open")
+	}
+	return r.userResourceOverrides, nil
 }
 
 func (r *FSRepo) FileManager() *filestore.FileManager {

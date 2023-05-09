@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb"
-	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
+	blocks "github.com/ipfs/go-libipfs/blocks"
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/kubo/core/commands/cmdenv"
 
@@ -85,7 +85,7 @@ func finishCLIExport(res cmds.Response, re cmds.ResponseEmitter) error {
 	if !specified {
 		// default based on TTY availability
 		errStat, _ := os.Stderr.Stat()
-		if 0 != (errStat.Mode() & os.ModeCharDevice) {
+		if (errStat.Mode() & os.ModeCharDevice) != 0 {
 			showProgress = true
 		}
 	} else if val.(bool) {

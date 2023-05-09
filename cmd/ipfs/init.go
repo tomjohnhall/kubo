@@ -19,7 +19,7 @@ import (
 	fsrepo "github.com/ipfs/kubo/repo/fsrepo"
 
 	cmds "github.com/ipfs/go-ipfs-cmds"
-	files "github.com/ipfs/go-ipfs-files"
+	"github.com/ipfs/go-libipfs/files"
 	options "github.com/ipfs/interface-go-ipfs-core/options"
 	config "github.com/ipfs/kubo/config"
 )
@@ -32,8 +32,9 @@ const (
 	profileOptionName   = "profile"
 )
 
+// nolint
 var errRepoExists = errors.New(`ipfs configuration file already exists!
-Reinitializing would overwrite your keys.
+Reinitializing would overwrite your keys
 `)
 
 var initCmd = &cmds.Command{

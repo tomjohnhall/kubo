@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,10 +8,11 @@ import (
 	"io"
 	"path"
 	"sort"
+	"strconv"
 	"sync"
+	"text/tabwriter"
 	"time"
 
-	files "github.com/ipfs/go-ipfs-files"
 	"github.com/ipfs/kubo/commands"
 	"github.com/ipfs/kubo/config"
 	"github.com/ipfs/kubo/core/commands/cmdenv"
@@ -57,16 +57,18 @@ ipfs peers in the internet.
 		"filters":    swarmFiltersCmd,
 		"peers":      swarmPeersCmd,
 		"peering":    swarmPeeringCmd,
-		"stats":      swarmStatsCmd, // libp2p Network Resource Manager
-		"limit":      swarmLimitCmd, // libp2p Network Resource Manager
+		"resources":  swarmResourcesCmd, // libp2p Network Resource Manager
+
 	},
 }
 
 const (
-	swarmVerboseOptionName   = "verbose"
-	swarmStreamsOptionName   = "streams"
-	swarmLatencyOptionName   = "latency"
-	swarmDirectionOptionName = "direction"
+	swarmVerboseOptionName           = "verbose"
+	swarmStreamsOptionName           = "streams"
+	swarmLatencyOptionName           = "latency"
+	swarmDirectionOptionName         = "direction"
+	swarmResetLimitsOptionName       = "reset"
+	swarmUsedResourcesPercentageName = "min-used-limit-perc"
 )
 
 type peeringResult struct {
@@ -78,8 +80,8 @@ var swarmPeeringCmd = &cmds.Command{
 	Helptext: cmds.HelpText{
 		Tagline: "Modify the peering subsystem.",
 		ShortDescription: `
-'ipfs swarm peering' manages the peering subsystem. 
-Peers in the peering subsystem are maintained to be connected, reconnected 
+'ipfs swarm peering' manages the peering subsystem.
+Peers in the peering subsystem are maintained to be connected, reconnected
 on disconnect with a back-off.
 The changes are not saved to the config.
 `,
@@ -122,6 +124,9 @@ var swarmPeeringAddCmd = &cmds.Command{
 		if err != nil {
 			return err
 		}
+		if !node.IsOnline {
+			return ErrNotOnline
+		}
 
 		for _, addrinfo := range addInfos {
 			node.Peering.AddPeer(addrinfo)
@@ -153,6 +158,10 @@ var swarmPeeringLsCmd = &cmds.Command{
 		if err != nil {
 			return err
 		}
+		if !node.IsOnline {
+			return ErrNotOnline
+		}
+
 		peers := node.Peering.ListPeers()
 		return cmds.EmitOnce(res, addrInfos{Peers: peers})
 	},
@@ -189,6 +198,9 @@ var swarmPeeringRmCmd = &cmds.Command{
 		if err != nil {
 			return err
 		}
+		if !node.IsOnline {
+			return ErrNotOnline
+		}
 
 		for _, arg := range req.Arguments {
 			id, err := peer.Decode(arg)
@@ -206,7 +218,7 @@ var swarmPeeringRmCmd = &cmds.Command{
 	Type: peeringResult{},
 	Encoders: cmds.EncoderMap{
 		cmds.Text: cmds.MakeTypedEncoder(func(req *cmds.Request, w io.Writer, pr *peeringResult) error {
-			fmt.Fprintf(w, "add %s %s\n", pr.ID.String(), pr.Status)
+			fmt.Fprintf(w, "remove %s %s\n", pr.ID.String(), pr.Status)
 			return nil
 		}),
 	},
@@ -311,24 +323,15 @@ var swarmPeersCmd = &cmds.Command{
 	Type: connInfos{},
 }
 
-var swarmStatsCmd = &cmds.Command{
+var swarmResourcesCmd = &cmds.Command{
 	Status: cmds.Experimental,
 	Helptext: cmds.HelpText{
-		Tagline: "Report resource usage for a scope.",
-		LongDescription: `Report resource usage for a scope.
-The scope can be one of the following:
-- system        -- reports the system aggregate resource usage.
-- transient     -- reports the transient resource usage.
-- svc:<service> -- reports the resource usage of a specific service.
-- proto:<proto> -- reports the resource usage of a specific protocol.
-- peer:<peer>   -- reports the resource usage of a specific peer.
-- all           -- reports the resource usage for all currently active scopes.
-
-The output of this command is JSON.
+		Tagline: "Get a summary of all resources accounted for by the libp2p Resource Manager.",
+		LongDescription: `
+Get a summary of all resources accounted for by the libp2p Resource Manager.
+This includes the limits and the usage against those limits.
+This can output a human readable table and JSON encoding.
 `},
-	Arguments: []cmds.Argument{
-		cmds.StringArg("scope", true, false, "scope of the stat report"),
-	},
 	Run: func(req *cmds.Request, res cmds.ResponseEmitter, env cmds.Environment) error {
 		node, err := cmdenv.GetNode(env)
 		if err != nil {
@@ -336,105 +339,71 @@ The output of this command is JSON.
 		}
 
 		if node.ResourceManager == nil {
-			return libp2p.NoResourceMgrError
+			return libp2p.ErrNoResourceMgr
 		}
 
-		if len(req.Arguments) != 1 {
-			return fmt.Errorf("must specify exactly one scope")
-		}
-		scope := req.Arguments[0]
-		result, err := libp2p.NetStat(node.ResourceManager, scope)
+		cfg, err := node.Repo.Config()
 		if err != nil {
 			return err
 		}
 
-		b := new(bytes.Buffer)
-		enc := json.NewEncoder(b)
-		err = enc.Encode(result)
+		userResourceOverrides, err := node.Repo.UserResourceOverrides()
 		if err != nil {
 			return err
 		}
-		return cmds.EmitOnce(res, b)
+
+		// FIXME: we shouldn't recompute limits, either save them or load them from libp2p (https://github.com/libp2p/go-libp2p/issues/2166)
+		limitConfig, _, err := libp2p.LimitConfig(cfg.Swarm, userResourceOverrides)
+		if err != nil {
+			return err
+		}
+
+		rapi, ok := node.ResourceManager.(rcmgr.ResourceManagerState)
+		if !ok { // NullResourceManager
+			return libp2p.ErrNoResourceMgr
+		}
+
+		return cmds.EmitOnce(res, libp2p.MergeLimitsAndStatsIntoLimitsConfigAndUsage(limitConfig, rapi.Stat()))
 	},
 	Encoders: cmds.EncoderMap{
-		cmds.Text: HumanJSONEncoder,
-	},
-}
+		cmds.JSON: cmds.MakeTypedEncoder(func(req *cmds.Request, w io.Writer, limitsAndUsage libp2p.LimitsConfigAndUsage) error {
+			return json.NewEncoder(w).Encode(limitsAndUsage)
+		}),
+		cmds.Text: cmds.MakeTypedEncoder(func(req *cmds.Request, w io.Writer, limitsAndUsage libp2p.LimitsConfigAndUsage) error {
+			tw := tabwriter.NewWriter(w, 20, 8, 0, '\t', 0)
+			defer tw.Flush()
 
-var swarmLimitCmd = &cmds.Command{
-	Status: cmds.Experimental,
-	Helptext: cmds.HelpText{
-		Tagline: "Get or set resource limits for a scope.",
-		LongDescription: `Get or set resource limits for a scope.
-The scope can be one of the following:
-- system        -- limits for the system aggregate resource usage.
-- transient     -- limits for the transient resource usage.
-- svc:<service> -- limits for the resource usage of a specific service.
-- proto:<proto> -- limits for the resource usage of a specific protocol.
-- peer:<peer>   -- limits for the resource usage of a specific peer.
-
-The output of this command is JSON.
-
-It is possible to use this command to inspect and tweak limits at runtime:
-
-	$ ipfs swarm limit system > limit.json
-	$ vi limit.json
-	$ ipfs swarm limit system limit.json
-
-Changes made via command line are persisted in the Swarm.ResourceMgr.Limits field of the $IPFS_PATH/config file.
-`},
-	Arguments: []cmds.Argument{
-		cmds.StringArg("scope", true, false, "scope of the limit"),
-		cmds.FileArg("limit.json", false, false, "limits to be set").EnableStdin(),
-	},
-	Run: func(req *cmds.Request, res cmds.ResponseEmitter, env cmds.Environment) error {
-		node, err := cmdenv.GetNode(env)
-		if err != nil {
-			return err
-		}
-
-		if node.ResourceManager == nil {
-			return libp2p.NoResourceMgrError
-		}
-
-		scope := req.Arguments[0]
-
-		//  set scope limit to new values (when limit.json is passed as a second arg)
-		if req.Files != nil {
-			var newLimit rcmgr.BaseLimit
-			it := req.Files.Entries()
-			if it.Next() {
-				file := files.FileFromEntry(it)
-				if file == nil {
-					return errors.New("expected a JSON file")
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t\n", "Scope", "Limit Name", "Limit Value", "Limit Usage Amount", "Limit Usage Percent")
+			for _, ri := range libp2p.LimitConfigsToInfo(limitsAndUsage) {
+				var limit, percentage string
+				switch ri.LimitValue {
+				case rcmgr.Unlimited64:
+					limit = "unlimited"
+					percentage = "n/a"
+				case rcmgr.BlockAllLimit64:
+					limit = "blockAll"
+					percentage = "n/a"
+				default:
+					limit = strconv.FormatInt(int64(ri.LimitValue), 10)
+					if ri.CurrentUsage == 0 {
+						percentage = "0%"
+					} else {
+						percentage = strconv.FormatFloat(float64(ri.CurrentUsage)/float64(ri.LimitValue)*100, 'f', 1, 64) + "%"
+					}
 				}
-				if err := json.NewDecoder(file).Decode(&newLimit); err != nil {
-					return fmt.Errorf("decoding JSON as ResourceMgrScopeConfig: %w", err)
-				}
-				return libp2p.NetSetLimit(node.ResourceManager, node.Repo, scope, newLimit)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t\n",
+					ri.ScopeName,
+					ri.LimitName,
+					limit,
+					ri.CurrentUsage,
+					percentage,
+				)
 			}
-			if err := it.Err(); err != nil {
-				return fmt.Errorf("error opening limit JSON file: %w", err)
-			}
-		}
 
-		// get scope limit
-		result, err := libp2p.NetLimit(node.ResourceManager, scope)
-		if err != nil {
-			return err
-		}
-
-		b := new(bytes.Buffer)
-		enc := json.NewEncoder(b)
-		err = enc.Encode(result)
-		if err != nil {
-			return err
-		}
-		return cmds.EmitOnce(res, b)
+			return nil
+		}),
 	},
-	Encoders: cmds.EncoderMap{
-		cmds.Text: HumanJSONEncoder,
-	},
+	Type: libp2p.LimitsConfigAndUsage{},
 }
 
 type streamInfo struct {
@@ -840,7 +809,7 @@ Filters default to those specified under the "Swarm.AddrFilters" config key.
 			return err
 		}
 
-		if n.PeerHost == nil {
+		if !n.IsOnline {
 			return ErrNotOnline
 		}
 
@@ -876,7 +845,7 @@ var swarmFiltersAddCmd = &cmds.Command{
 			return err
 		}
 
-		if n.PeerHost == nil {
+		if !n.IsOnline {
 			return ErrNotOnline
 		}
 
@@ -932,7 +901,7 @@ var swarmFiltersRmCmd = &cmds.Command{
 			return err
 		}
 
-		if n.PeerHost == nil {
+		if !n.IsOnline {
 			return ErrNotOnline
 		}
 
